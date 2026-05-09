@@ -1,162 +1,289 @@
 
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Bike Racing Game</title>
+    <title>3D Bike Race</title>
     <style>
-        body {
-            margin: 0;
-            background-color: #f0f0f0;
-            font-family: Arial, sans-serif;
-            font-size: 14px;
-        }
-        #canvas {
-            width: 100%;
-            height: 100vh;
-            display: block;
-        }
+        body { margin: 0; overflow: hidden; }
+        #score { position: absolute; top: 10px; left: 10px; color: white; font-size: 20px; }
+        #startScreen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); color: white; display: flex; flex-direction: column; justify-content: center; align-items: center; font-size: 30px; cursor: pointer; }
+        #gameOverScreen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); color: white; display: none; flex-direction: column; justify-content: center; align-items: center; font-size: 30px; cursor: pointer; }
+        #gameOverScreen button { font-size: 20px; padding: 10px 20px; margin-top: 20px; cursor: pointer; }
     </style>
 </head>
 <body>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <div id="score">Score: 0</div>
+    <div id="startScreen">
+        Tap to Start
+    </div>
+    <div id="gameOverScreen">
+        Game Over!
+        <div id="finalScore"></div>
+        <button onclick="restartGame()">Restart</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/examples/js/controls/OrbitControls.js"></script>
+
     <script>
-        let scene, camera, renderer, bike, obstacles = [], stars = [], score = 0;
-        let isJumping = false;
+        let scene, camera, renderer, bike, road, grass, sky;
+        let score = 0;
+        let lane = 0; // 0: left, 1: center, 2: right
+        let gameRunning = false;
+        let obstacles = [];
+        let coins = [];
+        const laneWidth = 3;
+        const roadLength = 200;
+        const obstacleSpawnRate = 0.02;
+        const coinSpawnRate = 0.03;
+        let lastObstacleZ = -10; // Prevent immediate obstacle spawn
+        let lastCoinZ = -5;
+
+        // Start Screen
+        const startScreen = document.getElementById('startScreen');
+        startScreen.addEventListener('click', startGame);
+
+        // Game Over Screen
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreDisplay = document.getElementById('finalScore');
 
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            renderer = new THREE.WebGLRenderer({
-                canvas: document.createElement('canvas'),
-                antialias: true
-            });
+            camera.position.set(0, 3, 10);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer();
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-            camera.position.set(0, 5, 10);
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
 
-            let geometry = new THREE.BoxGeometry(1, 1, 1);
-            let material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-            bike = new THREE.Mesh(geometry, material);
-            bike.position.set(0, 0, 0);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight.position.set(1, 1, 1).normalize();
+            scene.add(directionalLight);
+
+            const shadowLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            shadowLight.position.set(0, 5, 0);
+            shadowLight.castShadow = true;
+            shadowLight.shadow.mapSize.width = 1024;
+            shadowLight.shadow.mapSize.height = 1024;
+            shadowLight.shadow.camera.near = 0.5;
+            shadowLight.shadow.camera.far = 50;
+            scene.add(shadowLight);
+
+            // Sky
+            const skyGeometry = new THREE.SphereGeometry(500, 32, 32);
+            const skyMaterial = new THREE.MeshBasicMaterial({ color: 0x87CEEB, side: THREE.BackSide });
+            sky = new THREE.Mesh(skyGeometry, skyMaterial);
+            scene.add(sky);
+
+            // Grass
+            const grassGeometry = new THREE.PlaneGeometry(100, roadLength * 2);
+            const grassMaterial = new THREE.MeshLambertMaterial({ color: 0x228B22 });
+            grass = new THREE.Mesh(grassGeometry, grassMaterial);
+            grass.rotation.x = -Math.PI / 2;
+            grass.position.y = -0.1;
+            grass.receiveShadow = true;
+            scene.add(grass);
+
+            // Road
+            const roadGeometry = new THREE.PlaneGeometry(laneWidth * 3, roadLength * 2);
+            const roadMaterial = new THREE.MeshLambertMaterial({ color: 0x666666 });
+            road = new THREE.Mesh(roadGeometry, roadMaterial);
+            road.rotation.x = -Math.PI / 2;
+            road.receiveShadow = true;
+            scene.add(road);
+
+            // Bike
+            const bikeGeometry = new THREE.BoxGeometry(1, 1, 2);
+            const bikeMaterial = new THREE.MeshLambertMaterial({ color: 0x0000FF });
+            bike = new THREE.Mesh(bikeGeometry, bikeMaterial);
+            bike.position.y = 0.5;
+            bike.castShadow = true;
+            bike.receiveShadow = true;
             scene.add(bike);
 
-            let starGeometry = new THREE.SphereGeometry(0.2, 32, 32);
-            let starMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-            for (let i = 0; i < 10; i++) {
-                let star = new THREE.Mesh(starGeometry, starMaterial);
-                star.position.set(Math.random() * 10 - 5, Math.random() * 10 - 5, Math.random() * 10 - 5);
-                scene.add(star);
-                stars.push(star);
-            }
+            // Event Listeners
+            document.addEventListener('keydown', handleKeyDown);
+            document.addEventListener('touchstart', handleTouchStart);
 
-            let obstacleGeometry = new THREE.BoxGeometry(1, 1, 1);
-            let obstacleMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-            for (let i = 0; i < 10; i++) {
-                let obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
-                obstacle.position.set(Math.random() * 10 - 5, Math.random() * 10 - 5, Math.random() * 10 - 5);
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function handleKeyDown(event) {
+            if (!gameRunning) return;
+            if (event.key === 'ArrowLeft') {
+                moveLeft();
+            } else if (event.key === 'ArrowRight') {
+                moveRight();
+            }
+        }
+
+        function handleTouchStart(event) {
+            if (!gameRunning) return;
+            const touchX = event.touches[0].clientX;
+            if (touchX < window.innerWidth / 2) {
+                moveLeft();
+            } else {
+                moveRight();
+            }
+        }
+
+        function moveLeft() {
+            lane = Math.max(0, lane - 1);
+        }
+
+        function moveRight() {
+            lane = Math.min(2, lane + 1);
+        }
+
+        function updateBikePosition() {
+            bike.position.x = (lane - 1) * laneWidth;
+        }
+
+        function spawnObstacle() {
+            if (Math.random() < obstacleSpawnRate) {
+                const obstacleGeometry = new THREE.BoxGeometry(1, 1, 1);
+                const obstacleMaterial = new THREE.MeshLambertMaterial({ color: 0xFF0000 });
+                const obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
+                obstacle.position.y = 0.5;
+                const lanePosition = Math.floor(Math.random() * 3);
+                obstacle.position.x = (lanePosition - 1) * laneWidth;
+                obstacle.position.z = -roadLength;
+                obstacle.castShadow = true;
+                obstacle.receiveShadow = true;
                 scene.add(obstacle);
                 obstacles.push(obstacle);
+                lastObstacleZ = -roadLength;
             }
+        }
 
-            let clock = new THREE.Clock();
-            let lastTime = 0;
-            function animate() {
-                requestAnimationFrame(animate);
-                let time = clock.getElapsedTime();
-                let deltaTime = time - lastTime;
-                lastTime = time;
+        function spawnCoin() {
+            if (Math.random() < coinSpawnRate) {
+                const coinGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.2, 32);
+                const coinMaterial = new THREE.MeshLambertMaterial({ color: 0xFFFF00 });
+                const coin = new THREE.Mesh(coinGeometry, coinMaterial);
+                coin.position.y = 0.7;
+                const lanePosition = Math.floor(Math.random() * 3);
+                coin.position.x = (lanePosition - 1) * laneWidth;
+                coin.position.z = -roadLength;
+                coin.castShadow = true;
+                coin.receiveShadow = true;
+                scene.add(coin);
+                coins.push(coin);
+                lastCoinZ = -roadLength;
+            }
+        }
 
-                bike.position.z -= 0.1;
-                bike.position.x += Math.sin(time * 0.1) * 0.1;
+        function updateObstacles() {
+            for (let i = 0; i < obstacles.length; i++) {
+                obstacles[i].position.z += 0.5;
 
-                for (let i = 0; i < obstacles.length; i++) {
-                    let obstacle = obstacles[i];
-                    obstacle.position.z -= 0.1;
-                    if (obstacle.position.z < -10) {
-                        obstacle.position.set(Math.random() * 10 - 5, Math.random() * 10 - 5, 10);
-                    }
-                    if (isCollision(bike.position, obstacle.position)) {
-                        alert('Game Over!');
-                        return;
-                    }
+                // Collision detection
+                const distance = bike.position.distanceTo(obstacles[i].position);
+                if (distance < 1.5) {
+                    gameOver();
                 }
 
-                for (let i = 0; i < stars.length; i++) {
-                    let star = stars[i];
-                    star.position.z -= 0.1;
-                    if (star.position.z < -10) {
-                        star.position.set(Math.random() * 10 - 5, Math.random() * 10 - 5, 10);
-                    }
-                    if (isCollision(bike.position, star.position)) {
-                        score++;
-                        star.position.set(Math.random() * 10 - 5, Math.random() * 10 - 5, 10);
-                    }
+                if (obstacles[i].position.z > 10) {
+                    scene.remove(obstacles[i]);
+                    obstacles.splice(i, 1);
+                    i--;
+                }
+            }
+        }
+
+        function updateCoins() {
+            for (let i = 0; i < coins.length; i++) {
+                coins[i].position.z += 0.5;
+
+                // Collision detection
+                const distance = bike.position.distanceTo(coins[i].position);
+                if (distance < 1.5) {
+                    score += 10;
+                    document.getElementById('score').innerText = 'Score: ' + score;
+                    scene.remove(coins[i]);
+                    coins.splice(i, 1);
+                    i--;
                 }
 
-                renderer.render(scene, camera);
-                document.getElementById('score').innerText = 'Score: ' + score;
+                if (coins[i].position.z > 10) {
+                    scene.remove(coins[i]);
+                    coins.splice(i, 1);
+                    i--;
+                }
             }
+        }
+
+        function updateRoadPosition() {
+            road.position.z += 0.5;
+            grass.position.z += 0.5;
+            if (road.position.z > roadLength) {
+                road.position.z -= roadLength * 2;
+                grass.position.z -= roadLength * 2;
+            }
+        }
+
+        function animate() {
+            if (!gameRunning) return;
+            requestAnimationFrame(animate);
+
+            updateBikePosition();
+            spawnObstacle();
+            spawnCoin();
+            updateObstacles();
+            updateCoins();
+            updateRoadPosition();
+
+            renderer.render(scene, camera);
+        }
+
+        function startGame() {
+            score = 0;
+            document.getElementById('score').innerText = 'Score: 0';
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            gameRunning = true;
             animate();
+        }
 
-            window.addEventListener('touchstart', function(event) {
-                if (event.touches.length > 0) {
-                    let touch = event.touches[0];
-                    if (touch.clientY < window.innerHeight / 2) {
-                        isJumping = true;
-                    }
-                }
-            });
-            window.addEventListener('touchend', function(event) {
-                isJumping = false;
-            });
-            window.addEventListener('keydown', function(event) {
-                if (event.key === ' ') {
-                    isJumping = true;
-                }
-            });
-            window.addEventListener('keyup', function(event) {
-                if (event.key === ' ') {
-                    isJumping = false;
-                }
-            });
+        function gameOver() {
+            gameRunning = false;
+            finalScoreDisplay.innerText = 'Final Score: ' + score;
+            gameOverScreen.style.display = 'flex';
 
-            function isCollision(pos1, pos2) {
-                let distance = Math.sqrt(Math.pow(pos1.x - pos2.x, 2) + Math.pow(pos1.y - pos2.y, 2) + Math.pow(pos1.z - pos2.z, 2));
-                return distance < 1;
-            }
+            // Clean up existing obstacles and coins
+            obstacles.forEach(obstacle => scene.remove(obstacle));
+            coins.forEach(coin => scene.remove(coin));
+            obstacles = [];
+            coins = [];
 
-            function jump() {
-                if (!isJumping) {
-                    isJumping = true;
-                    let velocity = 0;
-                    let gravity = 0.1;
-                    let lastTime = 0;
-                    function update() {
-                        let time = clock.getElapsedTime();
-                        let deltaTime = time - lastTime;
-                        lastTime = time;
-                        velocity += gravity * deltaTime;
-                        bike.position.y += velocity * deltaTime;
-                        if (bike.position.y > 1) {
-                            bike.position.y = 1;
-                            isJumping = false;
-                        }
-                        requestAnimationFrame(update);
-                    }
-                    update();
-                }
-            }
+        }
 
-            document.getElementById('jump').addEventListener('click', jump);
+        function restartGame() {
+            // Reset bike position and lane
+            bike.position.set(0, 0.5, 0);
+            lane = 1;
+
+            // Reset road position
+            road.position.z = 0;
+            grass.position.z = 0;
+
+            startGame();
         }
 
         init();
     </script>
-    <canvas id="canvas"></canvas>
-    <div id="score"></div>
-    <button id="jump">Jump</button>
 </body>
 </html>

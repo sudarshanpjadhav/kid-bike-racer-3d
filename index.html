@@ -1,0 +1,162 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Bike Racing Game</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+        #canvas {
+            width: 100%;
+            height: 100vh;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, bike, obstacles = [], stars = [], score = 0;
+        let isJumping = false;
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({
+                canvas: document.createElement('canvas'),
+                antialias: true
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            camera.position.set(0, 5, 10);
+
+            let geometry = new THREE.BoxGeometry(1, 1, 1);
+            let material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            bike = new THREE.Mesh(geometry, material);
+            bike.position.set(0, 0, 0);
+            scene.add(bike);
+
+            let starGeometry = new THREE.SphereGeometry(0.2, 32, 32);
+            let starMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            for (let i = 0; i < 10; i++) {
+                let star = new THREE.Mesh(starGeometry, starMaterial);
+                star.position.set(Math.random() * 10 - 5, Math.random() * 10 - 5, Math.random() * 10 - 5);
+                scene.add(star);
+                stars.push(star);
+            }
+
+            let obstacleGeometry = new THREE.BoxGeometry(1, 1, 1);
+            let obstacleMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+            for (let i = 0; i < 10; i++) {
+                let obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
+                obstacle.position.set(Math.random() * 10 - 5, Math.random() * 10 - 5, Math.random() * 10 - 5);
+                scene.add(obstacle);
+                obstacles.push(obstacle);
+            }
+
+            let clock = new THREE.Clock();
+            let lastTime = 0;
+            function animate() {
+                requestAnimationFrame(animate);
+                let time = clock.getElapsedTime();
+                let deltaTime = time - lastTime;
+                lastTime = time;
+
+                bike.position.z -= 0.1;
+                bike.position.x += Math.sin(time * 0.1) * 0.1;
+
+                for (let i = 0; i < obstacles.length; i++) {
+                    let obstacle = obstacles[i];
+                    obstacle.position.z -= 0.1;
+                    if (obstacle.position.z < -10) {
+                        obstacle.position.set(Math.random() * 10 - 5, Math.random() * 10 - 5, 10);
+                    }
+                    if (isCollision(bike.position, obstacle.position)) {
+                        alert('Game Over!');
+                        return;
+                    }
+                }
+
+                for (let i = 0; i < stars.length; i++) {
+                    let star = stars[i];
+                    star.position.z -= 0.1;
+                    if (star.position.z < -10) {
+                        star.position.set(Math.random() * 10 - 5, Math.random() * 10 - 5, 10);
+                    }
+                    if (isCollision(bike.position, star.position)) {
+                        score++;
+                        star.position.set(Math.random() * 10 - 5, Math.random() * 10 - 5, 10);
+                    }
+                }
+
+                renderer.render(scene, camera);
+                document.getElementById('score').innerText = 'Score: ' + score;
+            }
+            animate();
+
+            window.addEventListener('touchstart', function(event) {
+                if (event.touches.length > 0) {
+                    let touch = event.touches[0];
+                    if (touch.clientY < window.innerHeight / 2) {
+                        isJumping = true;
+                    }
+                }
+            });
+            window.addEventListener('touchend', function(event) {
+                isJumping = false;
+            });
+            window.addEventListener('keydown', function(event) {
+                if (event.key === ' ') {
+                    isJumping = true;
+                }
+            });
+            window.addEventListener('keyup', function(event) {
+                if (event.key === ' ') {
+                    isJumping = false;
+                }
+            });
+
+            function isCollision(pos1, pos2) {
+                let distance = Math.sqrt(Math.pow(pos1.x - pos2.x, 2) + Math.pow(pos1.y - pos2.y, 2) + Math.pow(pos1.z - pos2.z, 2));
+                return distance < 1;
+            }
+
+            function jump() {
+                if (!isJumping) {
+                    isJumping = true;
+                    let velocity = 0;
+                    let gravity = 0.1;
+                    let lastTime = 0;
+                    function update() {
+                        let time = clock.getElapsedTime();
+                        let deltaTime = time - lastTime;
+                        lastTime = time;
+                        velocity += gravity * deltaTime;
+                        bike.position.y += velocity * deltaTime;
+                        if (bike.position.y > 1) {
+                            bike.position.y = 1;
+                            isJumping = false;
+                        }
+                        requestAnimationFrame(update);
+                    }
+                    update();
+                }
+            }
+
+            document.getElementById('jump').addEventListener('click', jump);
+        }
+
+        init();
+    </script>
+    <canvas id="canvas"></canvas>
+    <div id="score"></div>
+    <button id="jump">Jump</button>
+</body>
+</html>
